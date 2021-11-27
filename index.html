@@ -217,34 +217,6 @@
         }
       }
 
-      function renderDepthBuffer2(frame, pose, depthInfo) {
-        let session = frame.session;
-        const width = session.renderState.baseLayer.framebufferWidth;
-        const height = session.renderState.baseLayer.framebufferHeight;
-        gl.enable(gl.SCISSOR_TEST);
-        const SUBDIVSIONS = 10; // in each dim, so SUBDIVISIONS^2 work
-        gl.bindFramebuffer(
-          gl.FRAMEBUFFER,
-          session.renderState.baseLayer.framebuffer
-        );
-        //for speed and simplicity, only one sample point in each rect for now
-        const rectWidth = width / 2;
-        const rectHeight = height / 2;
-        const MAXDEPTH = 1.5; // green at this point
-        let depth = depthInfo.getDepthInMeters(0.5, 0.5);
-        if (depth > MAXDEPTH) depth = MAXDEPTH;
-        gl.scissor(width / 4, height / 4, rectWidth, rectHeight);
-        let time = Date.now();
-        gl.clearColor(
-          Math.cos(time / 2000),
-          Math.cos(time / 4000),
-          Math.cos(time / 6000),
-          0.5
-        );
-        //gl.clearColor(1 - depth / MAXDEPTH, depth / MAXDEPTH, 0, 0.75);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      }
-
       function onXRFrame(t, frame) {
         let session = frame.session;
         session.requestAnimationFrame(onXRFrame);
