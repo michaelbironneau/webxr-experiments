@@ -173,7 +173,11 @@
           }
           document.getElementById("depth").innerText = "";
           const info = getDepthDetails(depthInfo);
-          audioObj.panner.set({ pan: -1 + info.minPos.x * 2 });
+          audioObj.panner.set({
+            positionX: -1 + info.minPos.x * 2,
+            positionY: -1 + info.minPos.y * 2,
+            positionZ: info.min,
+          });
           audioObj.near.set({ volume: -10 - 5 * info.min });
           if (info.min < 0.5) {
             audioObj.collision.start();
@@ -191,8 +195,8 @@
       }
 
       function setupAudio() {
-        const panner = new Tone.Panner({
-          pan: 0,
+        const panner = new Tone.Panner3D({
+          panningModel: "HRTF",
         }).toDestination();
 
         const filter1 = new Tone.AutoFilter({
