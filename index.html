@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, user-scalable=no"
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="96x96" href="favicon-96x96.png" />
+    <link rel="stylesheet" href="css/common.css" />
+
+    <title>Depth Information Playground</title>
+  </head>
+  <body>
+    <div id="overlay">
+      <header>
+        <details open>
+          <summary>Depth Information Overlay</summary>
+          <p>
+            This sample illustrates how we can use the depth information from
+            the device to display a depth map overlay, which is composed of
+            tiles that get more red as objects get nearer. This information
+            could be used to help visually impaired people navigate complex
+            unfamiliar spaces faster, and combined with other computer vision
+            techniques to access information about features of the environment
+            such as signage, stairs or doors.
+            <a class="back" href="./index.html">Back</a>
+          </p>
+          <div id="session-info"></div>
+          <div id="pose"></div>
+          <div id="depth"></div>
+          <div id="warning-zone"></div>
+          <button id="xr-button" class="barebones-button" disabled>
+            XR not found
+          </button>
+        </details>
+      </header>
+    </div>
+    <main style="text-align: center">
+      <p>Click 'Enter AR' to see content</p>
+    </main>
+    <script type="module">
+      // XR globals.
+      let xrButton = document.getElementById("xr-button");
+      let xrSession = null;
+      let xrRefSpace = null;
+
+      // WebGL scene globals.
+      let gl = null;
+
+      function checkSupportedState() {
+        navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
+          if (supported) {
+            xrButton.innerHTML = "Enter AR";
+          } else {
+            xrButton.innerHTML = "AR not found";
+          }
+
+          xrButton.disabled = !supported;
+        });
+      }
+
+      function initXR() {
+        if (!window.isSecureContext) {
+          let message = "WebXR unavailable due to insecure context";
+          document.getElementById("warning-zone").innerText = message;
+        }
+
+        if (navigator.xr) {
+          xrButton.addEventListener("click", onButtonClicked);
+          navigator.xr.addEventListener("devicechange", checkSupportedState);
+          checkSupportedState();
+        }
+      }
+
+      function onButtonClicked() {
+        if (!xrSession) {
+          // Ask for an optional DOM Overlay, see https://immersive-web.github.io/dom-overlays/
+          navigator.xr
+            .requestSession("immersive-ar", {
+              optionalFeatures: ["dom-overlay"],
+              requiredFeatures: ["depth-sensing"],
+              depthSensing: {
+                usagePreference: ["cpu-optimized", "gpu-optimized"],
+                dataFormatPreference: ["float32", "luminance-alpha"],
+              },
+              domOverlay: { root: document.getElementById("overlay") },
+            })
+            .then(onSessionStarted, onRequestSessionError);
+        } else {
+          xrSession.end();
+        }
+      }
+
+      function onSessionStarted(session) {
+        xrSession = session;
+        xrButton.innerHTML = "Exit AR";
+
+        // Show which type of DOM Overlay got enabled (if any)
+        if (session.domOverlayState) {
+          document.getElementById("session-info").innerHTML =
+            "DOM Overlay type: " + session.domOverlayState.type;
+        }
+
+        session.addEventListener("end", onSessionEnded);
+        let canvas = document.createElement("canvas");
+        gl = canvas.getContext("webgl", {
+          xrCompatible: true,
+        });
+        session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+        session.requestReferenceSpace("local").then((refSpace) => {
+          xrRefSpace = refSpace;
+          session.requestAnimationFrame(onXRFrame);
+        });
+      }
+
+      function onRequestSessionError(ex) {
+        alert("Failed to start immersive AR session.");
+        console.error(ex.message);
+      }
+
+      function onEndSession(session) {
+        session.end();
+      }
+
+      function onSessionEnded(event) {
+        xrSession = null;
+        xrButton.innerHTML = "Enter AR";
+        document.getElementById("session-info").innerHTML = "";
+        gl = null;
+      }
+
+      function meanDepth(depthInfo) {
+        let runningTotal = 0;
+        const WIDTH = 50;
+        const HEIGHT = 50;
+        for (var i = 0; i < WIDTH; i++) {
+          for (var j = 0; j < HEIGHT; j++) {
+            runningTotal += depthInfo.getDepthInMeters(i / WIDTH, j / HEIGHT);
+          }
+        }
+        return runningTotal / (WIDTH * HEIGHT);
+      }
+
+      function depthInformation(frame, pose) {
+        document.getElementById(
+          "depth"
+        ).innerText = `Getting depth information from first of ${pose.views.length} views`;
+        let depthInfo = undefined;
+        try {
+          depthInfo = frame.getDepthInformation(pose.views[0]);
+          if (!depthInfo) {
+            document.getElementById("depth").innerText = "No depth info!";
+            return;
+          }
+          document.getElementById(
+            "depth"
+          ).innerText = `Depth info: ${depthInfo}`;
+          document.getElementById("depth").innerText = `Mean depth: ${meanDepth(
+            depthInfo
+          )}m`;
+        } catch (ex) {
+          document.getElementById("depth").innerText = ex;
+          return;
+        }
+      }
+
+      function showDepthOverlay(frame, pose) {
+        let depthInfo = undefined;
+        try {
+          depthInfo = frame.getDepthInformation(pose.views[0]);
+          if (!depthInfo) {
+            document.getElementById("depth").innerText = "No depth info!";
+            return;
+          }
+          document.getElementById("depth").innerText = "";
+          renderDepthBuffer(frame, pose, depthInfo);
+        } catch (ex) {
+          document.getElementById("depth").innerText = ex;
+          return;
+        }
+      }
+
+      function renderDepthBuffer(frame, pose, depthInfo) {
+        let session = frame.session;
+        const width = session.renderState.baseLayer.framebufferWidth;
+        const height = session.renderState.baseLayer.framebufferHeight;
+        gl.bindFramebuffer(
+          gl.FRAMEBUFFER,
+          session.renderState.baseLayer.framebuffer
+        );
+        gl.enable(gl.SCISSOR_TEST);
+        const SUBDIVSIONS = 20; // in each dim, so SUBDIVISIONS^2 work
+        //for speed and simplicity, only one sample point in each rect for now
+        const rectWidth = width / SUBDIVSIONS;
+        const rectHeight = height / SUBDIVSIONS;
+        const MAXDEPTH = 1.5; // green at this point
+        for (let i = 0; i < SUBDIVSIONS; i++) {
+          for (let j = 0; j < SUBDIVSIONS; j++) {
+            let depth = depthInfo.getDepthInMeters(
+              i / SUBDIVSIONS,
+              j / SUBDIVSIONS
+            );
+            if (depth > MAXDEPTH) depth = MAXDEPTH;
+            gl.scissor(
+              width * (i / SUBDIVSIONS),
+              height * (j / SUBDIVSIONS),
+              rectWidth,
+              rectHeight
+            );
+            gl.clearColor(1 - depth / MAXDEPTH, depth / MAXDEPTH, 0, 0.75);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+          }
+        }
+      }
+
+      function renderDepthBuffer2(frame, pose, depthInfo) {
+        let session = frame.session;
+        const width = session.renderState.baseLayer.framebufferWidth;
+        const height = session.renderState.baseLayer.framebufferHeight;
+        gl.enable(gl.SCISSOR_TEST);
+        const SUBDIVSIONS = 10; // in each dim, so SUBDIVISIONS^2 work
+        gl.bindFramebuffer(
+          gl.FRAMEBUFFER,
+          session.renderState.baseLayer.framebuffer
+        );
+        //for speed and simplicity, only one sample point in each rect for now
+        const rectWidth = width / 2;
+        const rectHeight = height / 2;
+        const MAXDEPTH = 1.5; // green at this point
+        let depth = depthInfo.getDepthInMeters(0.5, 0.5);
+        if (depth > MAXDEPTH) depth = MAXDEPTH;
+        gl.scissor(width / 4, height / 4, rectWidth, rectHeight);
+        let time = Date.now();
+        gl.clearColor(
+          Math.cos(time / 2000),
+          Math.cos(time / 4000),
+          Math.cos(time / 6000),
+          0.5
+        );
+        //gl.clearColor(1 - depth / MAXDEPTH, depth / MAXDEPTH, 0, 0.75);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      }
+
+      function onXRFrame(t, frame) {
+        let session = frame.session;
+        session.requestAnimationFrame(onXRFrame);
+        let pose = frame.getViewerPose(xrRefSpace);
+        if (pose) {
+          const p = pose.transform.position;
+          document.getElementById("pose").innerText =
+            "Position: " +
+            p.x.toFixed(3) +
+            ", " +
+            p.y.toFixed(3) +
+            ", " +
+            p.z.toFixed(3);
+          //depthInformation(frame, pose);
+          showDepthOverlay(frame, pose);
+        } else {
+          document.getElementById("pose").innerText = "Position: (null pose)";
+        }
+      }
+
+      initXR();
+    </script>
+  </body>
+</html>
