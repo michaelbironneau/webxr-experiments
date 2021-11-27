@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, user-scalable=no"
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="96x96" href="favicon-96x96.png" />
+    <link rel="stylesheet" href="css/common.css" />
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.32/Tone.js"
+      integrity="sha512-USKCQh+O8BX/a2K06xPNTwduhmQvN/m9FhkR7PRysCRlPoqIItl7Qz3xVTZC/oIHe6g5XvnLHDUgGpRMZZTmFQ=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <title>"Echolocation" example</title>
+  </head>
+  <body>
+    <div id="overlay">
+      <header>
+        <details open>
+          <summary>Tone.JS Test</summary>
+          <p>
+            Trying out some stuff.
+            <a class="back" href="./index.html">Back</a>
+          </p>
+          <div class="slidecontainer">
+            <label>Volume</label>
+            <input
+              type="range"
+              min="-25"
+              max="-6"
+              value="-10"
+              class="slider"
+              id="volume"
+            />
+          </div>
+          <div class="slidecontainer">
+            <label>Pan-X</label>
+            <input
+              type="range"
+              min="0"
+              max="10"
+              value="0"
+              class="slider"
+              id="pan-x"
+            />
+          </div>
+          <div class="slidecontainer">
+            <label>Pan-Y</label>
+            <input
+              type="range"
+              min="0"
+              max="10"
+              value="0"
+              class="slider"
+              id="pan-y"
+            />
+          </div>
+          <div class="slidecontainer">
+            <label>Pan-Z</label>
+            <input
+              type="range"
+              min="0"
+              max="10"
+              value="0"
+              class="slider"
+              id="pan-z"
+            />
+          </div>
+
+          <div id="warning-zone"></div>
+          <button id="xr-button" class="barebones-button">Start</button>
+        </details>
+      </header>
+    </div>
+    <script type="module">
+      // XR globals.
+      let xrButton = document.getElementById("xr-button");
+      let volumeSlider = document.getElementById("volume");
+      let panXSlider = document.getElementById("pan-x");
+      let panYSlider = document.getElementById("pan-y");
+      let panZSlider = document.getElementById("pan-z");
+      let started = false;
+
+      xrButton.addEventListener("click", function () {
+        Tone.start();
+        if (started) {
+          audioObj.near.stop();
+          console.debug("Stopping audio");
+          xrButton.innerText = "Start";
+          started = false;
+          return;
+        }
+        console.log("Starting audio");
+        xrButton.innerText = "Stop";
+        audioObj.near.start();
+        started = true;
+      });
+
+      function setupAudio() {
+        const panner = new Tone.Panner3D({
+          panningModel: "HRTF",
+        }).toDestination();
+
+        const filter1 = new Tone.AutoFilter({
+          frequency: 1,
+          depth: 1,
+        })
+          .connect(panner)
+          .start();
+
+        const oscNear = new Tone.Oscillator({
+          volume: -12,
+          type: "square6",
+          frequency: "E4",
+        }).connect(filter1);
+
+        return { panner: panner, near: oscNear };
+      }
+
+      volumeSlider.oninput = function () {
+        audioObj.near.set({ volume: this.value });
+      };
+
+      panXSlider.oninput = function () {
+        audioObj.panner.set({ positionX: 0.1 * this.value });
+      };
+      panYSlider.oninput = function () {
+        audioObj.panner.set({ positionY: 0.1 * this.value });
+      };
+      panZSlider.oninput = function () {
+        audioObj.panner.set({ positionZ: 0.1 * this.value });
+      };
+      const audioObj = setupAudio();
+      console.log(audioObj);
+    </script>
+  </body>
+</html>

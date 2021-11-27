@@ -15,7 +15,7 @@ openssl pkey -in key_enc.pem -out key.pem
 3. Run server
 
 ```
-python -m http.server 8000
+python server.py
 ```
 
 4. Figure out your LAN IP address

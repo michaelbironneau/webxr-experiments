@@ -11,23 +11,22 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="96x96" href="favicon-96x96.png" />
     <link rel="stylesheet" href="css/common.css" />
-    <script
-      src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.32/Tone.js"
-      integrity="sha512-USKCQh+O8BX/a2K06xPNTwduhmQvN/m9FhkR7PRysCRlPoqIItl7Qz3xVTZC/oIHe6g5XvnLHDUgGpRMZZTmFQ=="
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    ></script>
-    <title>"Echolocation" example</title>
+
+    <title>Depth Information Playground</title>
   </head>
   <body>
     <div id="overlay">
       <header>
         <details open>
-          <summary>Spatial audio as echolocation</summary>
+          <summary>Depth Information Overlay</summary>
           <p>
             This sample illustrates how we can use the depth information from
-            the device, combined with a panner, to help a visually impaired user
-            navigate a complex space.
+            the device to display a depth map overlay, which is composed of
+            tiles that get more red as objects get nearer. This information
+            could be used to help visually impaired people navigate complex
+            unfamiliar spaces faster, and combined with other computer vision
+            techniques to access information about features of the environment
+            such as signage, stairs or doors.
             <a class="back" href="./index.html">Back</a>
           </p>
           <div id="session-info"></div>
@@ -69,10 +68,7 @@
           let message = "WebXR unavailable due to insecure context";
           document.getElementById("warning-zone").innerText = message;
         }
-        xrButton.addEventListener("click", function () {
-          console.log("Started Audio Context");
-          Tone.start();
-        });
+
         if (navigator.xr) {
           xrButton.addEventListener("click", onButtonClicked);
           navigator.xr.addEventListener("devicechange", checkSupportedState);
@@ -102,7 +98,7 @@
       function onSessionStarted(session) {
         xrSession = session;
         xrButton.innerHTML = "Exit AR";
-        audioObj.near.start();
+
         // Show which type of DOM Overlay got enabled (if any)
         if (session.domOverlayState) {
           document.getElementById("session-info").innerHTML =
@@ -133,34 +129,43 @@
       function onSessionEnded(event) {
         xrSession = null;
         xrButton.innerHTML = "Enter AR";
-        audioObj.near.stop();
         document.getElementById("session-info").innerHTML = "";
         gl = null;
       }
 
-      function getDepthDetails(depthInfo) {
+      function meanDepth(depthInfo) {
         let runningTotal = 0;
-        const WIDTH = 15;
-        const HEIGHT = 15;
-        let minimum = 50;
-        let maximum = -1;
-        let minPos = { x: 0, y: 0 };
-
+        const WIDTH = 50;
+        const HEIGHT = 50;
         for (var i = 0; i < WIDTH; i++) {
           for (var j = 0; j < HEIGHT; j++) {
-            const x = depthInfo.getDepthInMeters(i / WIDTH, j / HEIGHT);
-            if (x < minimum) {
-              minimum = x;
-              minPos.x = i / WIDTH;
-              minPos.y = j / HEIGHT;
-            }
-            if (x > maximum) {
-              maximum = x;
-            }
+            runningTotal += depthInfo.getDepthInMeters(i / WIDTH, j / HEIGHT);
           }
         }
+        return runningTotal / (WIDTH * HEIGHT);
+      }
 
-        return { min: minimum, max: maximum, minPos: minPos };
+      function depthInformation(frame, pose) {
+        document.getElementById(
+          "depth"
+        ).innerText = `Getting depth information from first of ${pose.views.length} views`;
+        let depthInfo = undefined;
+        try {
+          depthInfo = frame.getDepthInformation(pose.views[0]);
+          if (!depthInfo) {
+            document.getElementById("depth").innerText = "No depth info!";
+            return;
+          }
+          document.getElementById(
+            "depth"
+          ).innerText = `Depth info: ${depthInfo}`;
+          document.getElementById("depth").innerText = `Mean depth: ${meanDepth(
+            depthInfo
+          )}m`;
+        } catch (ex) {
+          document.getElementById("depth").innerText = ex;
+          return;
+        }
       }
 
       function showDepthOverlay(frame, pose) {
@@ -172,49 +177,44 @@
             return;
           }
           document.getElementById("depth").innerText = "";
-          const info = getDepthDetails(depthInfo);
-          audioObj.panner.set({ pan: -1 + info.minPos.x * 2 });
-          audioObj.near.set({ volume: -10 - 5 * info.min });
-          if (info.min < 0.5) {
-            audioObj.collision.start();
-            audioObj.collision.set({ volume: -9 - 5 * info.min });
-          } else {
-            audioObj.collision.stop();
-          }
-          document.getElementById("depth").innerText = `Pan: ${
-            -1 + info.minPos.x * 2
-          }, Vol: ${-10 - 5 * info.min}`;
+          renderDepthBuffer(frame, pose, depthInfo);
         } catch (ex) {
           document.getElementById("depth").innerText = ex;
           return;
         }
       }
 
-      function setupAudio() {
-        const panner = new Tone.Panner({
-          pan: 0,
-        }).toDestination();
-
-        const filter1 = new Tone.AutoFilter({
-          frequency: 1,
-          depth: 1,
-        })
-          .connect(panner)
-          .start();
-
-        const oscNear = new Tone.Oscillator({
-          volume: -12,
-          type: "square6",
-          frequency: "E4",
-        }).connect(filter1);
-
-        const oscCollision = new Tone.Oscillator({
-          volume: -12,
-          type: "square6",
-          frequency: "C5",
-        }).connect(filter1);
-
-        return { panner: panner, near: oscNear, collision: oscCollision };
+      function renderDepthBuffer(frame, pose, depthInfo) {
+        let session = frame.session;
+        const width = session.renderState.baseLayer.framebufferWidth;
+        const height = session.renderState.baseLayer.framebufferHeight;
+        gl.bindFramebuffer(
+          gl.FRAMEBUFFER,
+          session.renderState.baseLayer.framebuffer
+        );
+        gl.enable(gl.SCISSOR_TEST);
+        const SUBDIVSIONS = 20; // in each dim, so SUBDIVISIONS^2 work
+        //for speed and simplicity, only one sample point in each rect for now
+        const rectWidth = width / SUBDIVSIONS;
+        const rectHeight = height / SUBDIVSIONS;
+        const MAXDEPTH = 3; // green at this point
+        for (let i = 0; i < SUBDIVSIONS; i++) {
+          for (let j = 0; j < SUBDIVSIONS; j++) {
+            let depth = depthInfo.getDepthInMeters(
+              i / SUBDIVSIONS,
+              j / SUBDIVSIONS
+            );
+            if (depth > MAXDEPTH) depth = MAXDEPTH;
+            gl.scissor(
+              width * (i / SUBDIVSIONS),
+              height * (j / SUBDIVSIONS),
+              rectWidth,
+              rectHeight
+            );
+            gl.clearColor(1 - depth / MAXDEPTH, depth / MAXDEPTH, 0, 0.75);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+          }
+        }
       }
 
       function onXRFrame(t, frame) {
@@ -230,12 +230,13 @@
             p.y.toFixed(3) +
             ", " +
             p.z.toFixed(3);
+          //depthInformation(frame, pose);
           showDepthOverlay(frame, pose);
         } else {
           document.getElementById("pose").innerText = "Position: (null pose)";
         }
       }
-      const audioObj = setupAudio();
+
       initXR();
     </script>
   </body>
